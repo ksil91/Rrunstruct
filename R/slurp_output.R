@@ -68,35 +68,101 @@ read_traces <- function(D) {
 #### Functions to read the results files ####
 
 slurp_results <- function(file, K, Rep) {
-  x <- suppressWarnings(readLines(file))
-  start <-which(str_detect(x, "^Inferred ancestry of individuals"))
-  end <- which(str_detect(x, "^Estimated Allele Frequencies"))
+  # i/o checks
+  if (!is.na(file) & !is.character(file)) stop("filename must be a string.")
 
-  # get the elements of the header
-  header <- x[start+1] %>%
-    str_replace_all("[^a-zA-Z ]", "") %>%
-    paste("Index", .) %>%
-    str_replace("Inferred clusters", "") %>%
-    str_trim %>%
-    str_split(" +") %>%
-    "[["(1)
+  s_f <- readr::read_lines(file)
+  s_f <- s_f[s_f!=""]
 
+  # Check for predefined populations
+  p <- grep("^Proportion of membership.*", s_f)
+  pre_pop <- TRUE
+  if (length(p) == 0) {
+    p = grep("^Overall proportion of membership*", s_f)
+    pre_pop <- FALSE
+  }
+  # Check for USEPOPINFO
+  if (length(grep("^USEPOPINFO", s_f)) ==0) {
+    upi <- FALSE
+  } else { upi <- TRUE}
 
-  # then extract the output for each individual
-  indivs <- x[(start+2):end]
+  # Get cluster memberships and number of predefined pops
+  mem_lines <- s_f[(p+3):(grep("^Allele-freq", s_f)-2)]
+  mem_lines <- str_trim(mem_lines)
+  pops=NULL
+  if (!pre_pop) {
+    mem_lines <- str_split_fixed(mem_lines, "\\s+", n=as.integer(K))
+    mem_lines <- t(mem_lines)
+    class(mem_lines) <- "numeric"
+    mem_df <- data.frame("Cluster" = mem_lines[,1],
+                         "Proportion" = mem_lines[,2],
+                         stringsAsFactors = FALSE)
+  } else {
+    mem_lines <- str_split_fixed(mem_lines, "\\s+", n=as.integer(K)+2)
+    mem_lines[,1] <- str_replace(mem_lines[,1], ":", "")
+    mem_df <- data.matrix(data.frame(mem_lines[-1, ], stringsAsFactors = FALSE))
+    colnames(mem_df) <- mem_lines[1,]
+    pops = nrow(mem_df)
+  }
 
-  # then get that all in a data frame
-  tmp <- indivs[str_detect(indivs, "[0-9]")] %>% # toss blank lines
-    str_replace_all("[():]", "")  %>%  # toss the ()'s and the :'s from the output
-    str_trim
+  # Get inferred ancestry of individuals
 
-  # read it into a table
-  df <- read.table(textConnection(tmp), header = FALSE)
+  if (!upi){
+  ances_lines <- s_f[(grep("^Inferred ancestry of.*", s_f)+1):(grep("^Estimated Allele Frequencies .*", s_f)-1)]
+  ances_lines <- str_trim(ances_lines)
+  } else {
+    ances_lines <- s_f[(grep("^Inferred ancestry of.*", s_f)+2):(grep("^Estimated Allele Frequencies .*", s_f)-1)]
+    ances_lines <- str_trim(ances_lines)
+  }
+  # extract genotype missing proportions for individuals
+  header <- gsub("\\(|\\)|:","", ances_lines[1], " ")
+  header <- str_split(header, " ")[[1]] %>% str_replace_all("[^a-zA-Z ]","")
+  header <- c("Index",header)
 
-  # then make the header as appropriate
-  names(df) <- c(header, 1:(ncol(df)-length(header)) )
+  ances_lines <- ances_lines[-1]
+  missing_proportions <- as.numeric(gsub("[\\(\\)]", "",
+                                         regmatches(ances_lines, regexpr("\\(.*?\\)", ances_lines))))
+  sample_label <- str_trim(gsub("\\(", "",
+                                regmatches(ances_lines, regexpr(".*\\(", ances_lines))))
+  sample_label <- str_split_fixed(sample_label, "\\s+", n = 2)
 
-  tbl_df(cbind(K = K, Rep = Rep, df))
+  if (!pre_pop) {
+    sample_summary <- data.frame(sample_label, missing_proportions)
+    split_n <- 3
+  } else {
+    population_assignment <- as.integer(str_trim(gsub("\\)|:", "",
+                                                      regmatches(ances_lines, regexpr("\\).*?:", ances_lines)))))
+    sample_summary <- data.frame(sample_label, missing_proportions, population_assignment)
+    split_n <- 4
+  }
+
+  if (upi) {
+    ancest_matrix <- gsub(":  ", "", regmatches(ances_lines, regexpr("..:(.*)", ances_lines)))
+    ancest_matrix <- str_split_fixed(ancest_matrix, "\\s+", n=as.integer(K)+1)
+    suppressWarnings(class(ancest_matrix) <- "numeric")
+
+    x <- ancest_matrix[!complete.cases(ancest_matrix),]
+    for(i in 1:ncol(x)-1){
+      v = rep(0,ncol(x))
+      v[1] <-i
+      v[i+1] <- 1
+      x[which(x[,1] == i),] <-  rep(v,each = nrow(x[which(x[,1] == i),]))
+    }
+    ancest_matrix[!complete.cases(ancest_matrix),] <- x
+    ancest_matrix <- ancest_matrix[,-1]
+  } else {
+    ancest_matrix <- gsub(":  ", "", regmatches(ances_lines, regexpr(":(.*)", ances_lines)))
+    ancest_matrix <- str_split_fixed(ancest_matrix, "\\s+", n=as.integer(K))
+    suppressWarnings(class(ancest_matrix) <- "numeric")
+
+  }
+
+  ancest_df <- data.frame(sample_summary,
+                          ancest_matrix, stringsAsFactors = FALSE)
+  colnames(ancest_df)[1:split_n] <- header[1:split_n]
+  colnames(ancest_df)[(split_n+1):ncol(ancest_df)] <- seq(1,ncol(ancest_matrix))
+
+  tbl_df(cbind(K = K, Rep = Rep, ancest_df))
 }
 
 

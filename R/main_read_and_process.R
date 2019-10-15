@@ -8,13 +8,14 @@
 #' of inferred ancestry proportions. \code{traces} is a data frame of the
 #' traces of a few key variables.
 #' @export
-read_and_process_structure_output <- function(Dir) {
+read_and_process_structure_output <- function(Dir, itraces=FALSE) {
 
   message("reading files")
   # read everything in
   results <- read_results(Dir)
+  if (itraces){
   traces <- read_traces(Dir)
-
+}
 
   # identify the maximum-a-posteriori q's
   res2 <- MAP_cluster(results)
@@ -32,11 +33,15 @@ read_and_process_structure_output <- function(Dir) {
 
   message("relabeling the traces and results")
   # and once we have that, we can relabel the traces and the results
-  suppressMessages(traces_relab <- relabel_traces(traces, max_perms))
+  if (itraces) {
+  suppressMessages(traces_relab <- relabel_traces(traces, max_perms))}
   suppressMessages(results_relab <- relabel_results(results, max_perms))
 
 
   # then send the results back:
-  list(q = ungroup(results_relab), traces = ungroup(traces_relab))
+  list(q = ungroup(results_relab))
+       #,traces = ungroup(traces_relab))
 
 }
+
+

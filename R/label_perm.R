@@ -11,13 +11,12 @@
 #' @return a summarised data frame with the column \code{map_cluster} in place of \code{cluster}.
 MAP_cluster  <- function(df) {
   df %>%
-    group_by_(.dots = names(df)[!(names(df) %in% c("cluster", "probability")) ])  %>% # group by everything except cluster and probability
+    group_by(.dots = names(df)[!(names(df) %in% c("cluster", "probability")) ])  %>% # group by everything except cluster and probability
     filter(probability == max(probability)) %>% # get the row that has maximum posterior
     summarise_each(funs(first)) %>% # take only one if the max posterior is shared between clusters
     transmute(map_cluster = cluster) %>%
     ungroup
 }
-
 
 
 
